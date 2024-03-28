@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <title>n인 m목</title>
+    <style>
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      #main{
+        width: 90%;
+        max-width: 550px;
+      }
+      
+      @media (max-width: 500px) {
+        #main {
+          width: 90%;
+          max-width: 99999px;
+        }
+      }
+      #board{
+        width: 100%;
+        aspect-ratio: 1 / 1;
+      }
+
+
+      .cross {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .cross::before,
+      .cross::after {
+        content: "";
+        position: absolute;
+        background-color: rgb(0, 0, 0); /* 십자가 색상 */
+      }
+
+      .cross::before {
+        width: 100%;
+        height: 1px; /* 십자가 가로줄 두께 */
+        top: 50%;
+        left: 0;
+        transform: translateY(-50%);
+      }
+
+      .cross::after {
+        width: 1px; /* 십자가 세로줄 두께 */
+        height: 100%;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .cell{
+        text-align: center;
+        text-justify:auto;
+        font-size: 25px;
+        font-weight: bold;
+        background-color: #f4d1ac;
+        overflow: hidden;
+        position: relative;
+        vertical-align: middle;
+        line-height:1.1
+      }
+
+      .highlight{
+        background-color: yellow;
+      }
+      .cell:hover{
+        background-color: aquamarine;
+      }
+      #board {
+        border-collapse: collapse;
+        justify-self: center;
+      }
+      .disabled {
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="main">
+      <h1>n인 m목</h1>
+      
+      <div id="board"></div>
+      <div id="player-list"></div>
+      <div id="current-player"></div>
+    </div>
+    <script>
+      const boardSize = 20;
+      let socket;
+      const board = document.getElementById("board");
+      const playerList = document.getElementById("player-list");
+      const currentPlayer = document.getElementById("current-player");
+
+      // 보드 초기화
+    function createBoard() {
+      board.style.display = 'grid';
+      board.style.gridTemplateColumns = `repeat(${boardSize}, 1fr)`;
+      board.style.gridTemplateRows = `repeat(${boardSize}, 1fr)`;
+
+      for (let i = 0; i < boardSize * boardSize; i++) {
+        const cell = document.createElement('div');
+        const cross = document.createElement('div');
+        cross.classList.add('cross');
+        cell.appendChild(cross);
+        cell.appendChild(document.createTextNode(" "));
+
+
+        cell.classList.add('cell');
+
+        cell.style.boxSizing = 'border-box';
+        
+
+        board.appendChild(cell);
+        cell.x = (i%boardSize);
+        cell.y = Math.floor(i/boardSize);
+        cell.addEventListener("click", handleCellClick);
+        cell.classList.add("disabled"); // 초기에 모든 셀 비활성화
+      }
+    }
+
+    createBoard()
+
+
+    function playBeep() {
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.type = 'sine'; // 사인파 형태
+      oscillator.frequency.value = 440; // 440Hz (A4 음계)
+
+      gainNode.gain.setValueAtTime(0, audioContext.currentTime); // 초기 게인 값 0
+      gainNode.gain.linearRampToValueAtTime(0.5, audioContext.currentTime + 0.01); // 공격 시간 10ms
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.2); // 감쇠 시간 200ms
+
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+      }, 220); // 220ms 동안 재생
+    }
+
+    function handleMsg (event) {
+        const data = event.data;
+        console.log(data);
+        msgs = data.split("@");
+        msgs.forEach(msg => {
+            const parts = msg.split("|");
+            if (parts[0] === "TITLE") {
+                document.getElementsByTagName("h1")[0].textContent = parts[1];
+            } 
+            else if (parts[0] === "BOARD") {
+                playBeep()
+                updateBoard(parts[1].split("\n"));
+            } else if (parts[0] === "PLAYERS") {
+                updatePlayerList(parts[1].split("\n"));
+            } else if (parts[0] === "CURRENT_PLAYER") {
+                updateCurrentPlayer(parts[1]);
+            } else if (parts[0] === "YOUR_TURN") {
+            // 현재 플레이어일 때만 보드 클릭 가능
+            board.querySelectorAll(".cell.disabled") .forEach((cell) => {
+                cell.classList.remove("disabled");
+            });
+            }
+            else if(parts[0]==="MSG"){
+              alert(parts[1]);
+            } 
+            else if (parts[0] === "WINNER") {
+                alert(`${parts[1]} 플레이어가 승리했습니다!`);
+                // resetGame();
+            } 
+            else if (parts[0] === "OCCUPIED") {
+                alert("그 위치는 이미 차있습니다. 다른 곳을 선택하세요.");
+            }
+        });
+    };
+
+
+      // 보드 업데이트
+      function updateBoard(boardData) {
+        for (let i = 0; i < boardSize; i++) {
+          for (let j = 0; j < boardSize; j++) {
+            const cell = board.children[i*boardSize+j];
+            const textNode = cell.lastChild;
+            const prev = textNode.textContent;
+            const current = boardData[j][i]
+            if(prev !== boardData[j][i]){
+              cell.classList.add("highlight");
+            }
+            else{
+              cell.classList.remove("highlight");
+            }
+            textNode.textContent = current;
+            if (boardData[i][j] !== " ") {
+              cell.classList.add("disabled");
+            }
+          }
+        }
+      }
+
+      // 플레이어 리스트 업데이트
+      function updatePlayerList(playerData) {
+        playerList.innerHTML = "";
+        playerData.forEach((player) => {
+          const div = document.createElement("div");
+          div.textContent = player;
+          playerList.appendChild(div);
+        });
+      }
+
+      // 현재 플레이어 업데이트
+      function updateCurrentPlayer(currentPlayerData) {
+        currentPlayer.textContent = `현재 플레이어: ${currentPlayerData}`;
+      }
+
+      // 셀 클릭 핸들러
+      function handleCellClick(event) {
+        const cell = event.currentTarget;
+        console.log(cell);
+        console.log(`${cell.x},${cell.y}`);
+        if (!cell.classList.contains("disabled")) {
+          socket.send(`${cell.y},${cell.x}`);
+          board.querySelectorAll(".cell:not(.disabled)").forEach((cell) => {
+            cell.classList.add("disabled");
+          });
+        }
+      }
+
+      // 게임 초기화
+      function resetGame() {
+        board.querySelectorAll(".cell").forEach((cell) => {
+          cell.textContent="";
+          cell.classList.add("disabled");
+        });
+      }
+
+      while(true){
+        nickname = prompt("닉네임을 입력하세요:");
+            if (nickname) {
+                socket = new WebSocket("ws://sgb.kr:8880");
+                socket.onmessage = handleMsg;
+                socket.onopen = () => {
+                    socket.send(nickname);
+                }
+                break;
+            }
+            else {
+                alert("닉네임을 입력해야 합니다.");
+            }
+        }
+    </script>
+  </body>
+</html>
